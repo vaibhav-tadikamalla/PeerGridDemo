@@ -6,11 +6,11 @@ services:
     region: oregon
     autoDeploy: true
     healthCheckPath: /health
-    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @collab/shared build && pnpm --filter server build && pnpm --filter server db:migrate
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @collab/shared build && pnpm --filter server build && node packages/server/src/db/migrate.mjs
     startCommand: node packages/server/dist/index.js
     envVars:
       - key: NODE_VERSION
-        value: 20
+        value: "20"
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL

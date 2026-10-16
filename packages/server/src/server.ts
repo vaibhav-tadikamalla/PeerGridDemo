@@ -71,7 +71,14 @@ export async function createServer(): Promise<FastifyInstance> {
 
   await app.register(cors, {
     origin: config.NODE_ENV === 'production'
-      ? [config.APP_URL]
+      ? (origin, cb) => {
+          // Allow the configured APP_URL, all *.onrender.com, and no-origin (server-to-server)
+          if (!origin) return cb(null, true);
+          const allowed =
+            origin === config.APP_URL ||
+            origin.endsWith('.onrender.com');
+          cb(null, allowed);
+        }
       : ['http://localhost:4860', 'http://localhost:4870', 'http://localhost:5173'],
     credentials: true,
   });
