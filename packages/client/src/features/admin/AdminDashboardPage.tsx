@@ -50,7 +50,7 @@ export default function AdminDashboardPage() {
   const hasError = summary.isError || rooms.isError || users.isError || health.isError || analytics.isError;
 
   return (
-    <div className="min-h-screen bg-zinc-900 text-zinc-100">
+    <div className="h-screen overflow-y-auto bg-zinc-900 text-zinc-100">
       {/* Header */}
       <header className="border-b border-zinc-700 bg-zinc-900/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">

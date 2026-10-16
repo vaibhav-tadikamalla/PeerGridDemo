@@ -5,7 +5,7 @@ interface Props {
   snapshot: SimulationSnapshot;
 }
 
-const fmtNum = (n: number) => n.toLocaleString();
+const fmtNum = (n: number) => (n ?? 0).toLocaleString();
 const fmtMs = (ms: number) => {
   if (ms < 1_000) return `${ms}ms`;
   const sec = Math.floor(ms / 1000);

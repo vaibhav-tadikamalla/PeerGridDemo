@@ -15,23 +15,24 @@ export default defineConfig({
     port: 4860,
     proxy: {
       '/api': {
-        target: 'http://localhost:4850',
+        target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      '/admin/benchmark': { target: 'http://localhost:3001', changeOrigin: true },
       '/admin/dashboard': {
-        target: 'http://localhost:4850',
+        target: 'http://localhost:3001',
         changeOrigin: true,
       },
       '/admin/simulation': {
-        target: 'http://localhost:4850',
+        target: 'http://localhost:3001',
         changeOrigin: true,
       },
       '/debug': {
-        target: 'http://localhost:4850',
+        target: 'http://localhost:3001',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:4850',
+        target: 'ws://localhost:3001',
         ws: true,
         changeOrigin: true,
       },

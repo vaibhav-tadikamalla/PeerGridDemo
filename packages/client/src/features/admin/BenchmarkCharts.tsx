@@ -35,9 +35,9 @@ function buildChartData(runs: BenchmarkRun[]): ChartPoint[] {
     const existing = byUsers.get(u);
     const point: ChartPoint = {
       users: u,
-      p50: run.results.latency.p50Ms,
-      p95: run.results.latency.p95Ms,
-      throughput: run.results.propagatedOpsPerSec,
+      p50: run.results.peerLatency?.p50Ms,
+      p95: run.results.peerLatency?.p95Ms,
+      throughput: (run.results.opsVerified / (run.results.measurementDurationMs / 1000)),
       successRate: Math.round(run.results.successRate * 10000) / 100,
     };
     if (!existing || existing.p50 > point.p50) {

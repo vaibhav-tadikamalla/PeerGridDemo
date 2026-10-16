@@ -102,16 +102,16 @@ export function BenchmarkRunHistory({ runs, total, selectedRunId, onSelect }: Pr
                     {res ? `${(res.measurementDurationMs / 1000).toFixed(0)}s` : `${cfg.durationSeconds}s`}
                   </td>
                   <td className="px-3 py-2 text-right text-zinc-400 font-mono">
-                    {res ? res.latency.sampleCount.toLocaleString() : '—'}
+                    {res ? (res.peerLatency?.sampleCount ?? 0).toLocaleString() : '—'}
                   </td>
                   <td className="px-3 py-2 text-right text-blue-300 font-mono font-medium">
-                    {res ? fmtMs(res.latency.p50Ms) : '—'}
+                    {res ? fmtMs(res.peerLatency?.p50Ms) : '—'}
                   </td>
                   <td className="px-3 py-2 text-right text-violet-300 font-mono font-medium">
-                    {res ? fmtMs(res.latency.p95Ms) : '—'}
+                    {res ? fmtMs(res.peerLatency?.p95Ms) : '—'}
                   </td>
                   <td className="px-3 py-2 text-right text-zinc-300 font-mono">
-                    {res ? res.propagatedOpsPerSec.toFixed(1) : '—'}
+                    {res ? (res.opsVerified / Math.max(1, res.measurementDurationMs / 1000)).toFixed(1) : '—'}
                   </td>
                   <td className="px-3 py-2 text-center">
                     {res == null ? '—' : res.convergenceAchieved

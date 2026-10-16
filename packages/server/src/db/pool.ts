@@ -16,9 +16,14 @@ export function createPool(): pg.Pool {
     max: config.DATABASE_POOL_MAX,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
   });
 
-  _pool.on('connect', () => {
+  _pool.on('connect', (client) => {
+    client.on('error', (err) => {
+      logger.warn({ err }, 'Database client connection error handled');
+    });
     logger.debug('New database connection established');
   });
 

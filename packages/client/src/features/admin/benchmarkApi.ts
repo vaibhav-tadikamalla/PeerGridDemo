@@ -56,16 +56,21 @@ export interface BenchmarkLiveStatus {
   progressPercent: number;
   totalExpectedUsers: number;
   activeEditors: number;
-  opsAttempted: number;
-  opsPropagated: number;
-  samplesCollected: number;
-  liveP50Ms: number;
-  liveP95Ms: number;
-  liveP99Ms: number;
-  latestLatencyMs: number;
-  recentLatencies: number[];
-  editsPerSecond: number;
+  measuredOperationsGenerated: number;
+  measuredOperationsTracked: number;
+  measuredOperationsFullyVerified: number;
+  peerDeliveriesExpected: number;
+  peerDeliveriesActual: number;
+  missingDeliveries: number;
+  deliveryRate: number;
+  peerP50Ms: number;
+  peerP95Ms: number;
+  peerP99Ms: number;
+  completionP50Ms: number;
+  completionP95Ms: number;
+  completionP99Ms: number;
   convergenceStatus: 'pending' | 'testing' | 'converged' | 'failed';
+  currentErrorCount: number;
   simulatedUsers: SimulatedUserStatus[];
   error: string | null;
 }
@@ -84,27 +89,16 @@ export interface LatencyStats {
 
 export interface BenchmarkResults {
   measurementDurationMs: number;
-  latency: LatencyStats;
-  opsAttempted: number;
-  opsPropagated: number;
-  opsTimedOut: number;
-  opsErrored: number;
+  opsGenerated: number;
+  opsTracked: number;
+  opsVerified: number;
+  peerDeliveriesExpected: number;
+  peerDeliveriesActual: number;
+  missingDeliveries: number;
   successRate: number;
-  errorRate: number;
-  propagatedOpsPerSec: number;
-  attemptedOpsPerSec: number;
-  connectionAttempts: number;
-  connectionSuccesses: number;
-  connectionFailures: number;
+  peerLatency: LatencyStats;
+  completionLatency: LatencyStats;
   convergenceAchieved: boolean;
-  convergenceTimeMs: number | null;
-  convergenceFingerprints: string[];
-  processMemoryAtStartBytes: number | null;
-  processMemoryPeakBytes: number | null;
-  processCpuUserMsTotal: number | null;
-  processCpuSystemMsTotal: number | null;
-  eventLoopLagBaselineMs: number | null;
-  eventLoopLagPeakMs: number | null;
 }
 
 export interface BenchmarkRun {

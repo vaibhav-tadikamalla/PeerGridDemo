@@ -943,19 +943,7 @@ export class CollaborationServer {
               } catch { /* ignore */ }
             }
           } else {
-            const walT0 = performance.now();
-            const seq = await appendUpdate(conn.fileId!, Buffer.from(result.rawUpdate));
-            const walMs = performance.now() - walT0;
-            walAppendLatency.observe(walMs);
-
-            if (seq === null) {
-              conn.log.error(
-                { fileId: conn.fileId },
-                '[updateLog] WAL append failed — update dropped to preserve durability ordering',
-              );
-              return;
-            }
-
+            // LATENCY OPTIMIZATION: Broadcast first, THEN persist!
             try {
               room.applyClientUpdate(result.rawUpdate, conn.connectionId);
             } catch (err) {
@@ -967,22 +955,34 @@ export class CollaborationServer {
 
             // ── UPGRADE 2: Publish to Redis Stream for cross-node replication ──
             if (this.roomStore instanceof RedisRoomStore) {
-              await this.roomStore.publishStreamUpdate(conn.fileId!, result.rawUpdate);
+              this.roomStore.publishStreamUpdate(conn.fileId!, result.rawUpdate).catch(err => {
+                conn.log.error({ err }, 'Redis publish failed');
+              });
             }
 
-            // ── Client ACK protocol ──────────────────────────────────────
-            // Send an ACK frame back to the client with the WAL sequence id
-            // so the client knows this update is durably persisted.
-            if (conn.ws.readyState === WebSocket.OPEN) {
-              const ackBuf = Buffer.alloc(9);
-              ackBuf[0] = MSG_ACK;
-              ackBuf.writeBigUInt64BE(seq, 1);
-              try {
-                conn.ws.send(ackBuf);
-                clientAckLatency.observe(walMs);
-                wsMessagesSentCounter.inc();
-              } catch { /* ignore */ }
-            }
+            // Fire and forget WAL append to unblock the hot path!
+            const walT0 = performance.now();
+            appendUpdate(conn.fileId!, Buffer.from(result.rawUpdate)).then(seq => {
+              const walMs = performance.now() - walT0;
+              walAppendLatency.observe(walMs);
+              
+              if (seq === null) {
+                conn.log.error({ fileId: conn.fileId }, '[updateLog] WAL append failed - durability lost for this update');
+              } else {
+                if (conn.ws.readyState === WebSocket.OPEN) {
+                  const ackBuf = Buffer.alloc(9);
+                  ackBuf[0] = MSG_ACK;
+                  ackBuf.writeBigUInt64BE(seq, 1);
+                  try {
+                    conn.ws.send(ackBuf);
+                    clientAckLatency.observe(walMs);
+                    wsMessagesSentCounter.inc();
+                  } catch { /* ignore */ }
+                }
+              }
+            }).catch(e => {
+                conn.log.error({ fileId: conn.fileId, err: e }, '[updateLog] WAL append error');
+            });
           }
         }
         // ── Rolling edits-per-minute counter ──────────────────────────────

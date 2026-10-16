@@ -8,6 +8,19 @@ interface TokenState {
 
 type Listener = () => void;
 
+async function safeJson<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Server returned non-JSON response: ${response.status} ${response.statusText}`);
+  }
+  try {
+    return await response.json() as T;
+  } catch (err) {
+    throw new Error('Failed to parse JSON response from server');
+  }
+}
+
 class TokenManager {
   private state: TokenState = {
     accessToken: null,
@@ -39,7 +52,6 @@ class TokenManager {
 
   isExpired(): boolean {
     if (!this.state.expiresAt) return true;
-    // 30 second buffer before actual expiry
     return Date.now() / 1000 > this.state.expiresAt - 30;
   }
 
@@ -47,7 +59,6 @@ class TokenManager {
     if (!this.state.accessToken) return null;
     if (!this.isExpired()) return this.state.accessToken;
 
-    // Token is expired, refresh it
     await this.refresh();
     return this.state.accessToken;
   }
@@ -78,7 +89,7 @@ class TokenManager {
         throw new Error('Refresh failed');
       }
 
-      const data = await response.json() as { accessToken: string; expiresAt: number };
+      const data = await safeJson<{ accessToken: string; expiresAt: number }>(response);
       this.setToken(data.accessToken, data.expiresAt);
     } catch {
       this.clearToken();
@@ -88,23 +99,34 @@ class TokenManager {
   async login(email: string, password: string): Promise<{
     user: { id: string; email: string; displayName: string; avatarUrl?: string };
   }> {
-    const response = await fetch(apiUrl('/api/auth/login'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-
-    if (!response.ok) {
-      const err = await response.json() as { message?: string };
-      throw new Error(err.message || 'Login failed');
+    let response: Response;
+    try {
+      response = await fetch(apiUrl('/api/auth/login'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (err: any) {
+      throw new Error(`Network error during login: ${err.message}`);
     }
 
-    const data = await response.json() as {
+    if (!response.ok) {
+      let message = 'Login failed';
+      try {
+        const errData = await safeJson<{ message?: string; error?: string }>(response);
+        message = errData.message || errData.error || message;
+      } catch (e) {
+        message = `Login failed (${response.status} ${response.statusText})`;
+      }
+      throw new Error(message);
+    }
+
+    const data = await safeJson<{
       accessToken: string;
       expiresAt: number;
       user: { id: string; email: string; displayName: string; avatarUrl?: string };
-    };
+    }>(response);
 
     this.setToken(data.accessToken, data.expiresAt);
     return { user: data.user };
@@ -113,23 +135,34 @@ class TokenManager {
   async register(email: string, password: string, name: string): Promise<{
     user: { id: string; email: string; displayName: string };
   }> {
-    const response = await fetch(apiUrl('/api/auth/register'), {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name }),
-    });
-
-    if (!response.ok) {
-      const err = await response.json() as { message?: string };
-      throw new Error(err.message || 'Registration failed');
+    let response: Response;
+    try {
+      response = await fetch(apiUrl('/api/auth/register'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name }),
+      });
+    } catch (err: any) {
+      throw new Error(`Network error during registration: ${err.message}`);
     }
 
-    const data = await response.json() as {
+    if (!response.ok) {
+      let message = 'Registration failed';
+      try {
+        const errData = await safeJson<{ message?: string; error?: string }>(response);
+        message = errData.message || errData.error || message;
+      } catch (e) {
+        message = `Registration failed (${response.status} ${response.statusText})`;
+      }
+      throw new Error(message);
+    }
+
+    const data = await safeJson<{
       accessToken: string;
       expiresAt: number;
       user: { id: string; email: string; displayName: string };
-    };
+    }>(response);
 
     this.setToken(data.accessToken, data.expiresAt);
     return { user: data.user };
@@ -144,6 +177,8 @@ class TokenManager {
           ? { Authorization: `Bearer ${this.state.accessToken}` }
           : {},
       });
+    } catch {
+      // ignore logout network errors
     } finally {
       this.clearToken();
     }
@@ -163,8 +198,14 @@ class TokenManager {
     });
 
     if (!response.ok) {
-      const err = await response.json() as { message?: string };
-      throw new Error(err.message || 'Failed to delete account');
+      let message = 'Failed to delete account';
+      try {
+        const errData = await safeJson<{ message?: string; error?: string }>(response);
+        message = errData.message || errData.error || message;
+      } catch (e) {
+        message = `Delete failed (${response.status})`;
+      }
+      throw new Error(message);
     }
 
     this.clearToken();

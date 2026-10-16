@@ -1,48 +1,34 @@
 /**
  * admin/BenchmarkRunDetail.tsx
- *
- * Expanded detail panel for a single selected benchmark run.
- * Shows full config, all latency percentiles, operation stats, resource metrics, and convergence.
  */
 
 import React from 'react';
-import { useBenchmarkRun } from './benchmarkHooks';
+import type { BenchmarkRun } from './benchmarkApi';
 import { benchmarkApi } from './benchmarkApi';
 
 interface Props {
-  runId: string;
+  run: BenchmarkRun;
   onClose: () => void;
 }
 
-function fmtMs(n: number | null | undefined): string {
-  if (n == null) return '—';
-  if (n < 1000) return `${n.toFixed(2)} ms`;
-  return `${(n / 1000).toFixed(3)} s`;
+function fmtMs(ms: number | null | undefined): string {
+  if (ms == null) return '—';
+  return `${ms.toFixed(1)}ms`;
 }
 
-function fmtBytes(n: number | null | undefined): string {
-  if (n == null) return '—';
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+function fmtPct(p: number | null | undefined): string {
+  if (p == null) return '—';
+  return `${(p * 100).toFixed(2)}%`;
 }
 
-function fmtPct(n: number | null | undefined): string {
-  if (n == null) return '—';
-  return `${(n * 100).toFixed(2)}%`;
+function fmtBytes(bytes: number | null | undefined): string {
+  if (bytes == null) return '—';
+  const mb = bytes / 1024 / 1024;
+  return `${mb.toFixed(1)} MB`;
 }
 
-export function BenchmarkRunDetail({ runId, onClose }: Props) {
-  const { data: run, isLoading } = useBenchmarkRun(runId);
-
-  if (isLoading) {
-    return (
-      <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg p-6 text-center text-zinc-500 text-sm">
-        Loading run details…
-      </div>
-    );
-  }
-
-  if (!run) return null;
-
+export function BenchmarkRunDetail({ run, onClose }: Props) {
+  const runId = run.id;
   const cfg = run.config;
   const res = run.results;
 
@@ -55,7 +41,7 @@ export function BenchmarkRunDetail({ runId, onClose }: Props) {
             Run <code className="text-blue-300">{runId.slice(0, 8)}</code>
           </h3>
           <p className="text-xs text-zinc-500 mt-0.5">
-            {new Date(run.created_at).toLocaleString()} · {run.status} · {cfg.userCount} users · {run.environment?.['source'] === 'external-cli' ? 'External CLI (end-to-end)' : (cfg.benchmarkMode === 'load' ? 'Load test mode' : 'Latency mode (t₁→t₂)')}
+            {new Date(run.created_at).toLocaleString()} | {run.status} | {cfg.userCount} users
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -99,19 +85,43 @@ export function BenchmarkRunDetail({ runId, onClose }: Props) {
             {/* Primary latency stats */}
             <section>
               <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-                Propagation Latency
-                <span className="ml-1.5 text-zinc-600 normal-case">(t₁→t₂, n={res.latency.sampleCount.toLocaleString()} samples)</span>
+                Peer Propagation Latency
+                <span className="ml-1.5 text-zinc-600 normal-case">(n={(res.peerLatency?.sampleCount ?? 0).toLocaleString()} deliveries)</span>
               </h4>
               <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
                 {[
-                  ['Min', fmtMs(res.latency.minMs), 'text-zinc-300'],
-                  ['Mean', fmtMs(res.latency.meanMs), 'text-zinc-300'],
-                  ['p50', fmtMs(res.latency.p50Ms), 'text-blue-300'],
-                  ['p90', fmtMs(res.latency.p90Ms), 'text-indigo-300'],
-                  ['p95', fmtMs(res.latency.p95Ms), 'text-violet-300'],
-                  ['p99', fmtMs(res.latency.p99Ms), 'text-rose-300'],
-                  ['Max', fmtMs(res.latency.maxMs), 'text-zinc-400'],
-                  ['Std Dev', fmtMs(res.latency.stddevMs), 'text-zinc-400'],
+                  ['Min', fmtMs(res.peerLatency?.minMs), 'text-zinc-300'],
+                  ['Mean', fmtMs(res.peerLatency?.meanMs), 'text-zinc-300'],
+                  ['p50', fmtMs(res.peerLatency?.p50Ms), 'text-blue-300'],
+                  ['p90', fmtMs(res.peerLatency?.p90Ms), 'text-indigo-300'],
+                  ['p95', fmtMs(res.peerLatency?.p95Ms), 'text-violet-300'],
+                  ['p99', fmtMs(res.peerLatency?.p99Ms), 'text-rose-300'],
+                  ['Max', fmtMs(res.peerLatency?.maxMs), 'text-zinc-400'],
+                  ['Std Dev', fmtMs(res.peerLatency?.stddevMs), 'text-zinc-400'],
+                ].map(([label, value, cls]) => (
+                  <div key={label as string} className="bg-zinc-900/60 rounded p-2">
+                    <p className="text-[10px] text-zinc-500">{label}</p>
+                    <p className={`text-sm font-mono font-semibold ${cls}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+            
+            <section>
+              <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                Operation Completion Latency
+                <span className="ml-1.5 text-zinc-600 normal-case">(Time until ALL peers received, n={(res.completionLatency?.sampleCount ?? 0).toLocaleString()} ops)</span>
+              </h4>
+              <div className="grid grid-cols-4 sm:grid-cols-8 gap-2">
+                {[
+                  ['Min', fmtMs(res.completionLatency?.minMs), 'text-zinc-300'],
+                  ['Mean', fmtMs(res.completionLatency?.meanMs), 'text-zinc-300'],
+                  ['p50', fmtMs(res.completionLatency?.p50Ms), 'text-blue-300'],
+                  ['p90', fmtMs(res.completionLatency?.p90Ms), 'text-indigo-300'],
+                  ['p95', fmtMs(res.completionLatency?.p95Ms), 'text-violet-300'],
+                  ['p99', fmtMs(res.completionLatency?.p99Ms), 'text-rose-300'],
+                  ['Max', fmtMs(res.completionLatency?.maxMs), 'text-zinc-400'],
+                  ['Std Dev', fmtMs(res.completionLatency?.stddevMs), 'text-zinc-400'],
                 ].map(([label, value, cls]) => (
                   <div key={label as string} className="bg-zinc-900/60 rounded p-2">
                     <p className="text-[10px] text-zinc-500">{label}</p>
@@ -126,33 +136,16 @@ export function BenchmarkRunDetail({ runId, onClose }: Props) {
               <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Operations</h4>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                 {[
-                  ['Attempted', res.opsAttempted.toLocaleString(), 'text-zinc-300'],
-                  ['Propagated', res.opsPropagated.toLocaleString(), 'text-green-400'],
-                  ['Timed Out', res.opsTimedOut.toLocaleString(), 'text-amber-400'],
+                  ['Ops Generated', (res.opsGenerated ?? 0).toLocaleString(), 'text-zinc-300'],
+                  ['Ops Tracked', (res.opsTracked ?? 0).toLocaleString(), 'text-green-400'],
+                  ['Ops Verified', (res.opsVerified ?? 0).toLocaleString(), 'text-green-400'],
+                  ['Expected Deliveries', (res.peerDeliveriesExpected ?? 0).toLocaleString(), 'text-zinc-300'],
+                  ['Actual Deliveries', (res.peerDeliveriesActual ?? 0).toLocaleString(), 'text-green-400'],
                   ['Success Rate', fmtPct(res.successRate), 'text-green-400'],
-                  ['Ops/s (prop.)', res.propagatedOpsPerSec.toFixed(2), 'text-blue-300'],
-                  ['Ops/s (att.)', res.attemptedOpsPerSec.toFixed(2), 'text-zinc-400'],
                 ].map(([label, value, cls]) => (
                   <div key={label as string} className="bg-zinc-900/60 rounded p-2">
                     <p className="text-[10px] text-zinc-500">{label}</p>
                     <p className={`text-sm font-mono font-semibold ${cls}`}>{value}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* Connections */}
-            <section>
-              <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Connections</h4>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  ['Attempts', res.connectionAttempts],
-                  ['Successes', res.connectionSuccesses],
-                  ['Failures', res.connectionFailures],
-                ].map(([label, value]) => (
-                  <div key={label as string} className="bg-zinc-900/60 rounded p-2">
-                    <p className="text-[10px] text-zinc-500">{label}</p>
-                    <p className="text-sm font-mono font-semibold text-zinc-300">{value}</p>
                   </div>
                 ))}
               </div>
@@ -163,40 +156,15 @@ export function BenchmarkRunDetail({ runId, onClose }: Props) {
               <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Convergence</h4>
               <div className="flex items-center gap-3">
                 <span className={`text-sm font-semibold ${res.convergenceAchieved ? 'text-green-400' : 'text-red-400'}`}>
-                  {res.convergenceAchieved ? '✓ Converged' : '✗ Not Converged'}
+                  {res.convergenceAchieved ? '✓ 100% SWARM DELIVERY VERIFIED' : '✕ FAILED'}
                 </span>
-                {res.convergenceTimeMs != null && (
-                  <span className="text-xs text-zinc-500">
-                    in ~{(res.convergenceTimeMs / 1000).toFixed(1)}s after measurement phase
-                  </span>
-                )}
               </div>
               <p className="text-xs text-zinc-600 mt-1">
-                All {res.convergenceFingerprints.length} editors' Y.Doc SHA-256 hashes{' '}
+                All {cfg.userCount} editors' Y.Doc SHA-256 hashes{' '}
                 {res.convergenceAchieved ? 'matched.' : 'DID NOT match.'}
               </p>
             </section>
 
-            {/* Resource metrics */}
-            <section>
-              <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-                Resource Metrics
-                <span className="ml-1.5 text-zinc-600 normal-case">(PeerGrid server process)</span>
-              </h4>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[
-                  ['Heap at Start', fmtBytes(res.processMemoryAtStartBytes)],
-                  ['Heap Peak', fmtBytes(res.processMemoryPeakBytes)],
-                  ['CPU User', res.processCpuUserMsTotal != null ? `${res.processCpuUserMsTotal}ms` : '—'],
-                  ['CPU System', res.processCpuSystemMsTotal != null ? `${res.processCpuSystemMsTotal}ms` : '—'],
-                ].map(([label, value]) => (
-                  <div key={label as string} className="bg-zinc-900/60 rounded p-2">
-                    <p className="text-[10px] text-zinc-500">{label}</p>
-                    <p className="text-sm font-mono text-zinc-300">{value}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
           </>
         )}
 

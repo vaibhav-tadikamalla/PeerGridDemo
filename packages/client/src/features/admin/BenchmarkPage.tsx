@@ -14,9 +14,9 @@
 import React, { useState, useEffect } from 'react';
 import { BenchmarkControls } from './BenchmarkControls';
 import { BenchmarkLiveStatus } from './BenchmarkLiveStatus';
-import { BenchmarkRunHistory } from './BenchmarkRunHistory';
+
 import { BenchmarkRunDetail } from './BenchmarkRunDetail';
-import { BenchmarkCharts } from './BenchmarkCharts';
+import { PerformanceEvaluation } from './PerformanceEvaluation';
 import { useBenchmarkStatus, useBenchmarkRuns, useBenchmarkRun } from './benchmarkHooks';
 import { benchmarkApi, type BenchmarkRun } from './benchmarkApi';
 
@@ -124,24 +124,16 @@ export function BenchmarkPage() {
           </div>
 
           {/* Comparative SVG Charts */}
-          {runs.data && runs.data.runs.filter(r => r.status === 'completed').length >= 2 && (
-            <BenchmarkCharts runs={runs.data.runs.filter(r => r.status === 'completed')} />
+          {runs.data && runs.data.runs.filter(r => r.status === 'completed').length >= 1 && (
+            <PerformanceEvaluation runs={runs.data.runs} />
           )}
 
-          {/* Run History Table */}
-          {runs.data && (
-            <BenchmarkRunHistory
-              runs={runs.data.runs}
-              total={runs.data.total}
-              selectedRunId={selectedRunId}
-              onSelect={id => setSelectedRunId(id === selectedRunId ? null : id)}
-            />
-          )}
+          
 
           {/* Selected Run Detail Inspection Panel */}
-          {selectedRunId && (
+          {selectedRunId && runs.data?.runs?.find(r => r.id === selectedRunId) && (
             <BenchmarkRunDetail
-              runId={selectedRunId}
+              run={runs.data.runs.find(r => r.id === selectedRunId)!}
               onClose={() => setSelectedRunId(null)}
             />
           )}
@@ -202,7 +194,7 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
 
   const res = run.results;
   const cfg = run.config;
-  const lat = res.latency;
+  const lat = res?.peerLatency || {} as any;
 
   return (
     <div className="bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 border-2 border-emerald-500/60 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
@@ -252,7 +244,7 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
           </span>
           <div className="my-1">
             <span className="text-3xl font-extrabold font-mono text-white">
-              {lat.p50Ms.toFixed(1)}
+              {(lat?.p50Ms != null ? lat.p50Ms.toFixed(1) : "-")}
             </span>
             <span className="text-xs text-zinc-400 ml-1">ms</span>
           </div>
@@ -266,7 +258,7 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
           </span>
           <div className="my-1">
             <span className="text-3xl font-extrabold font-mono text-zinc-100">
-              {lat.p95Ms.toFixed(1)}
+              {(lat?.p95Ms != null ? lat.p95Ms.toFixed(1) : "-")}
             </span>
             <span className="text-xs text-zinc-400 ml-1">ms</span>
           </div>
@@ -280,7 +272,7 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
           </span>
           <div className="my-1">
             <span className="text-3xl font-extrabold font-mono text-zinc-200">
-              {lat.p99Ms.toFixed(1)}
+              {(lat?.p99Ms != null ? lat.p99Ms.toFixed(1) : "-")}
             </span>
             <span className="text-xs text-zinc-400 ml-1">ms</span>
           </div>
@@ -294,12 +286,12 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
           </span>
           <div className="my-1">
             <span className="text-3xl font-extrabold font-mono text-emerald-300">
-              {res.opsPropagated}
+              {res.opsVerified}
             </span>
-            <span className="text-xs text-zinc-400 ml-1">/{res.opsAttempted}</span>
+            <span className="text-xs text-zinc-400 ml-1">/{res.opsGenerated}</span>
           </div>
           <span className="text-[10px] text-emerald-500">
-            {(res.successRate * 100).toFixed(1)}% propagation rate
+            {(res?.successRate != null ? (res.successRate * 100).toFixed(1) : "-")}% propagation rate
           </span>
         </div>
 
@@ -310,7 +302,7 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
           </span>
           <div className="my-1">
             <span className="text-3xl font-extrabold font-mono text-zinc-100">
-              {res.propagatedOpsPerSec.toFixed(1)}
+              {(res?.opsVerified != null && res?.measurementDurationMs != null ? (res.opsVerified / Math.max(1, res.measurementDurationMs / 1000)).toFixed(1) : "-")}
             </span>
             <span className="text-xs text-zinc-400 ml-1">ops/s</span>
           </div>
@@ -339,7 +331,7 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
           <span>•</span>
           <span>
             Measurement Duration:{' '}
-            <strong className="text-zinc-200">{(res.measurementDurationMs / 1000).toFixed(1)}s</strong>
+            <strong className="text-zinc-200">{(res?.measurementDurationMs != null ? (res.measurementDurationMs / 1000).toFixed(1) : "-")}s</strong>
           </span>
           <span>•</span>
           <span>

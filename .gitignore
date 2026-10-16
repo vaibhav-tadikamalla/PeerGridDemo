@@ -35,3 +35,12 @@ PeerGridCodebase1.txt
 DEMO_PREPARATION.md
 tmp_*.json
 tmp_*.txt
+patch*.js
+fixUI.js
+*_scratch.ts
+test_*.js
+validator.txt
+get_token.ts
+run_*.js
+run_*.ts
+

@@ -78,7 +78,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   await app.register(rateLimit, {
     global: true,
-    max: 120,
+    max: 10000,
     timeWindow: '1 minute',
   });
 

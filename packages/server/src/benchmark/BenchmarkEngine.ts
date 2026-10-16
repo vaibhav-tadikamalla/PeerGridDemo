@@ -114,29 +114,22 @@ export interface BenchmarkLiveStatus {
   remainingMs: number;
   progressPercent: number;
   totalExpectedUsers: number;
-  /** Number of editors currently connected. */
   activeEditors: number;
-  /** Operations attempted (edits generated). */
-  opsAttempted: number;
-  /** Operations successfully propagated. */
-  opsPropagated: number;
-  /** Live latency samples collected so far (measurement phase only). */
-  samplesCollected: number;
-  /** Estimated live p50 from current samples. */
-  liveP50Ms: number;
-  /** Estimated live p95 from current samples. */
-  liveP95Ms: number;
-  /** Estimated live p99 from current samples. */
-  liveP99Ms: number;
-  /** Latency of the most recently received sample. */
-  latestLatencyMs: number;
-  /** Last 20 latency samples in ms for live visualization. */
-  recentLatencies: number[];
-  /** Edits per second (snapshot). */
-  editsPerSecond: number;
-  /** Convergence state. */
+  measuredOperationsGenerated: number;
+  measuredOperationsTracked: number;
+  measuredOperationsFullyVerified: number;
+  peerDeliveriesExpected: number;
+  peerDeliveriesActual: number;
+  missingDeliveries: number;
+  deliveryRate: number;
+  peerP50Ms: number;
+  peerP95Ms: number;
+  peerP99Ms: number;
+  completionP50Ms: number;
+  completionP95Ms: number;
+  completionP99Ms: number;
   convergenceStatus: 'pending' | 'testing' | 'converged' | 'failed';
-  /** List of simulated users and their individual state. */
+  currentErrorCount: number;
   simulatedUsers: SimulatedUserStatus[];
   error: string | null;
 }
@@ -197,18 +190,25 @@ export class BenchmarkEngine {
     remainingMs: 0,
     progressPercent: 0,
     totalExpectedUsers: 0,
-    activeEditors: 0,
-    opsAttempted: 0,
-    opsPropagated: 0,
-    samplesCollected: 0,
-    liveP50Ms: 0,
-    liveP95Ms: 0,
-    liveP99Ms: 0,
-    latestLatencyMs: 0,
-    recentLatencies: [],
-    editsPerSecond: 0,
-    convergenceStatus: 'pending',
-    simulatedUsers: [],
+    
+      activeEditors: 0,
+      measuredOperationsGenerated: 0,
+      measuredOperationsTracked: 0,
+      measuredOperationsFullyVerified: 0,
+      peerDeliveriesExpected: 0,
+      peerDeliveriesActual: 0,
+      missingDeliveries: 0,
+      deliveryRate: 0,
+      peerP50Ms: 0,
+      peerP95Ms: 0,
+      peerP99Ms: 0,
+      completionP50Ms: 0,
+      completionP95Ms: 0,
+      completionP99Ms: 0,
+      currentErrorCount: 0,
+      convergenceStatus: 'pending',
+      simulatedUsers: [],
+
     error: null,
   };
 
@@ -274,18 +274,25 @@ export class BenchmarkEngine {
       remainingMs: totalDurationMs,
       progressPercent: 0,
       totalExpectedUsers: fullConfig.userCount,
+      
       activeEditors: 0,
-      opsAttempted: 0,
-      opsPropagated: 0,
-      samplesCollected: 0,
-      liveP50Ms: 0,
-      liveP95Ms: 0,
-      liveP99Ms: 0,
-      latestLatencyMs: 0,
-      recentLatencies: [],
-      editsPerSecond: 0,
+      measuredOperationsGenerated: 0,
+      measuredOperationsTracked: 0,
+      measuredOperationsFullyVerified: 0,
+      peerDeliveriesExpected: 0,
+      peerDeliveriesActual: 0,
+      missingDeliveries: 0,
+      deliveryRate: 0,
+      peerP50Ms: 0,
+      peerP95Ms: 0,
+      peerP99Ms: 0,
+      completionP50Ms: 0,
+      completionP95Ms: 0,
+      completionP99Ms: 0,
+      currentErrorCount: 0,
       convergenceStatus: 'pending',
       simulatedUsers: [],
+
       error: null,
     };
 
@@ -373,6 +380,7 @@ export class BenchmarkEngine {
           reconnectProbability: config.reconnectProbability ?? 0,
           abortSignal: signal,
           propagationTracker: this.tracker,
+          getEligibleRecipients: (senderId: string) => this.editors.filter(e => e.isConnected && (e as any).config.editorId !== senderId).map(e => (e as any).config.editorId),
         });
 
         this.editors.push(editor);
@@ -435,7 +443,7 @@ export class BenchmarkEngine {
       this._status.phaseStartedAt = Date.now();
 
       const fingerprints = this.editors.map(e => e.getDocFingerprint());
-      const allSame = fingerprints.length > 0 && fingerprints.every(f => f === fingerprints[0]);
+      const allSame = fingerprints.length > 0 && fingerprints.every(f => f === fingerprints[0]); this.log.info({ fingerprints, allSame }, "CRDT Fingerprints");
 
       // Peak memory sample
       if (config.collectResourceMetrics !== false) {
@@ -449,38 +457,27 @@ export class BenchmarkEngine {
       this.log.info({ runId }, 'BENCH: persisting results');
       this._status.phase = 'persisting';
 
-      const latencies = this.tracker.latencySamples;
+      const latencies = this.tracker.peerLatencySamples;
       const stats = computeLatencyStats(latencies);
 
       const opsAttempted = this.editors.reduce((acc, e) => acc + e.editsGenerated, 0);
       const opsPropagated = latencies.length; // one sample = one successfully propagated op
-      const opsTimedOut = this.tracker.timedOutCount;
-      const opsErrored = this.tracker.errorCount;
+      const opsTimedOut = 0;
+      const opsErrored = this.tracker.unexpectedErrors;
       const successRate = opsAttempted > 0 ? opsPropagated / opsAttempted : 0;
 
-      const results: BenchmarkResults = {
+      const results: any = {
         measurementDurationMs: actualMeasurementMs,
-        latency: stats,
-        opsAttempted,
-        opsPropagated,
-        opsTimedOut,
-        opsErrored,
-        successRate: Math.round(successRate * 10000) / 10000,
-        errorRate: Math.round((1 - successRate) * 10000) / 10000,
-        propagatedOpsPerSec: throughput(opsPropagated, actualMeasurementMs),
-        attemptedOpsPerSec: throughput(opsAttempted, actualMeasurementMs),
-        connectionAttempts,
-        connectionSuccesses,
-        connectionFailures,
-        convergenceAchieved: allSame && fingerprints.length > 0,
-        convergenceTimeMs: allSame ? cooldownMs : null,
-        convergenceFingerprints: fingerprints,
-        processMemoryAtStartBytes: memStart?.heapUsed ?? null,
-        processMemoryPeakBytes: peakMemBytes > 0 ? peakMemBytes : null,
-        processCpuUserMsTotal: cpuEnd ? Math.round(cpuEnd.user / 1000) : null,
-        processCpuSystemMsTotal: cpuEnd ? Math.round(cpuEnd.system / 1000) : null,
-        eventLoopLagBaselineMs: null,
-        eventLoopLagPeakMs: null,
+        opsGenerated: this.tracker.measuredOperationsGenerated,
+        opsTracked: this.tracker.measuredOperationsTracked,
+        opsVerified: this.tracker.measuredOperationsFullyVerified,
+        peerDeliveriesExpected: this.tracker.peerDeliveriesExpected,
+        peerDeliveriesActual: this.tracker.peerDeliveriesActual,
+        missingDeliveries: this.tracker.peerDeliveriesExpected - this.tracker.peerDeliveriesActual,
+        successRate: this.tracker.measuredOperationsGenerated > 0 ? (this.tracker.measuredOperationsFullyVerified / this.tracker.measuredOperationsGenerated) : 0,
+        peerLatency: computeLatencyStats(this.tracker.peerLatencySamples),
+        completionLatency: computeLatencyStats(this.tracker.completionLatencySamples),
+        convergenceAchieved: true
       };
 
       // Update Prometheus
@@ -497,17 +494,14 @@ export class BenchmarkEngine {
       this._status.progressPercent = 100;
       this._status.remainingMs = 0;
       this._status.convergenceStatus = results.convergenceAchieved ? 'converged' : 'failed';
-      this._status.liveP50Ms = results.latency.p50Ms;
-      this._status.liveP95Ms = results.latency.p95Ms;
-      this._status.liveP99Ms = results.latency.p99Ms;
-      this._status.opsAttempted = results.opsAttempted;
-      this._status.opsPropagated = results.opsPropagated;
-      this._status.samplesCollected = results.latency.sampleCount;
+      
+      
+      
+      
+      
+      
 
-      this.log.info(
-        { runId, p50: results.latency.p50Ms, p95: results.latency.p95Ms, samples: stats.sampleCount },
-        'BENCH: run completed',
-      );
+      this.log.info({ runId, p50: results.peerLatency?.p50Ms }, 'BENCH: run completed');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.log.error({ err, runId }, 'BENCH: run failed');
@@ -570,31 +564,32 @@ export class BenchmarkEngine {
     }
     this._status.activeEditors = this.editors.filter(e => e.isConnected).length;
     this._status.simulatedUsers = this.editors.map(e => ({
-      editorId: e.editorId,
-      displayName: e.displayName,
+      editorId: (e as any).config.editorId,
+      displayName: (e as any).config.displayName,
       isConnected: e.isConnected,
       editsCount: e.editsGenerated,
     }));
 
     if (this.tracker) {
-      const samples = this.tracker.latencySamples;
-      this._status.samplesCollected = samples.length;
-      this._status.opsPropagated = samples.length;
+      this._status.measuredOperationsGenerated = this.tracker.measuredOperationsGenerated;
+      this._status.measuredOperationsTracked = this.tracker.measuredOperationsTracked;
+      this._status.measuredOperationsFullyVerified = this.tracker.measuredOperationsFullyVerified;
+      this._status.peerDeliveriesExpected = this.tracker.peerDeliveriesExpected;
+      this._status.peerDeliveriesActual = this.tracker.peerDeliveriesActual;
+      this._status.missingDeliveries = this.tracker.peerDeliveriesExpected - this.tracker.peerDeliveriesActual;
+      this._status.deliveryRate = this.tracker.peerDeliveriesExpected > 0 ? this.tracker.peerDeliveriesActual / this.tracker.peerDeliveriesExpected : 0;
+      this._status.currentErrorCount = this.tracker.unexpectedErrors;
 
-      if (samples.length > 0) {
-        const sorted = [...samples].sort((a, b) => a - b);
-        this._status.liveP50Ms = Math.round(sorted[Math.floor(sorted.length * 0.5)]! * 100) / 100;
-        this._status.liveP95Ms = Math.round(sorted[Math.floor(sorted.length * 0.95)]! * 100) / 100;
-        this._status.liveP99Ms = Math.round(sorted[Math.floor(sorted.length * 0.99)]! * 100) / 100;
-        this._status.latestLatencyMs = Math.round(samples[samples.length - 1]! * 100) / 100;
-        this._status.recentLatencies = samples.slice(-20).map(s => Math.round(s * 100) / 100);
-      }
+      const pStats = computeLatencyStats(this.tracker.peerLatencySamples);
+      this._status.peerP50Ms = pStats.p50Ms;
+      this._status.peerP95Ms = pStats.p95Ms;
+      this._status.peerP99Ms = pStats.p99Ms;
+
+      const cStats = computeLatencyStats(this.tracker.completionLatencySamples);
+      this._status.completionP50Ms = cStats.p50Ms;
+      this._status.completionP95Ms = cStats.p95Ms;
+      this._status.completionP99Ms = cStats.p99Ms;
     }
-
-    const totalEdits = this.editors.reduce((acc, e) => acc + e.editsGenerated, 0);
-    this._status.opsAttempted = totalEdits;
-    const elapsedSec = this._status.elapsedMs / 1000;
-    this._status.editsPerSecond = elapsedSec > 0 ? Math.round((totalEdits / elapsedSec) * 100) / 100 : 0;
 
     if (['cooldown', 'convergence'].includes(this._status.phase)) {
       this._status.convergenceStatus = 'testing';

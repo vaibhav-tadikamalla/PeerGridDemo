@@ -3,32 +3,30 @@
  *
  * A simulated editor instrumented for benchmark latency measurement.
  *
- * CRITICAL: The server (websocket.ts handleAuthMessage) requires the FIRST
- * WebSocket message to be the auth JSON. Any binary message before auth
- * completes causes an immediate close. Therefore:
- *
- *   on('open')    → send auth JSON only
- *   on auth_success → send Yjs syncStep1 binary
- *
  * KEY DIFFERENCES from the production SimulatedEditor:
  *
  * 1. LATENCY MODE (default):
  *    Sends INCREMENTAL Yjs delta updates (Y.encodeStateAsUpdate(ydoc, stateVectorBefore))
- *    so exactly ONE struct appears in the update binary.
- *    Makes (clientID, clock) correlation unambiguous and O(1).
+ *    so that exactly ONE struct appears in the update binary.
+ *    This makes (clientID, clock) correlation unambiguous and O(1).
  *
  * 2. LOAD MODE:
- *    Sends FULL-STATE updates matching production SimulatedEditor.ts for load testing.
+ *    Sends FULL-STATE updates (Y.encodeStateAsUpdate(ydoc)) matching the real
+ *    production SimulatedEditor.ts behaviour for realistic load testing.
+ *    Propagation latency is NOT measured in this mode.
  *
- * 3. Auth uses sim-user- prefix for userId and sim- prefix for fileId so
- *    PermissionGateway bypass triggers (no DB lookup needed).
+ * 3. Auth uses `sim-user-` prefix for userId and `sim-` prefix for fileId so the
+ *    PermissionGateway sim-bypass triggers (no DB lookup needed).
  *
- * 4. On every MSG_SYNC update received (LATENCY mode only), calls
+ * 4. On every received MSG_SYNC update (LATENCY mode only), calls
  *    propagationTracker.recordReceive() with the exact update bytes.
  *
  * 5. Supports pauseEditing() / resumeEditing() for cooldown phase.
  *
  * 6. Exposes getDocFingerprint() for CRDT convergence integrity check.
+ *
+ * IMPORTANT: Do NOT modify this editor's Y.Doc update semantics for production
+ * PeerGrid use. The incremental delta update is benchmark-specific instrumentation.
  */
 
 import { WebSocket } from 'ws';
@@ -44,7 +42,6 @@ import type { BenchmarkPropagationTracker } from './BenchmarkPropagationTracker'
 const MSG_SYNC = 0;
 const MSG_AWARENESS = 1;
 
-/** Operating mode for the benchmark editor. */
 export type BenchmarkEditorMode = 'latency' | 'load';
 
 export interface BenchmarkSimulatedEditorConfig {
@@ -57,15 +54,13 @@ export interface BenchmarkSimulatedEditorConfig {
   reconnectProbability?: number;
   abortSignal: AbortSignal;
   propagationTracker: BenchmarkPropagationTracker;
-  /**
-   * 'latency': sends incremental delta updates for reliable t1->t2 correlation.
-   * 'load': sends full-state updates matching real SimulatedEditor behaviour.
-   * Default: 'latency'.
-   */
   mode?: BenchmarkEditorMode;
+  getEligibleRecipients: (senderId: string) => string[];
+  injectApplyFailure?: boolean;
+  injectTrackingFailure?: boolean;
+  injectDelayedAck?: boolean;
 }
 
-// Text pool for realistic content generation
 const TEXT_POOL = [
   'The quick brown fox jumps over the lazy dog. ',
   'In distributed systems, consistency and availability are fundamental trade-offs. ',
@@ -100,6 +95,7 @@ export class BenchmarkSimulatedEditor {
   }
 
   get isConnected(): boolean { return this._connected; }
+  get isSynced(): boolean { return this.synced; }
   get editsGenerated(): number { return this._editsGenerated; }
   get editorId(): string { return this.config.editorId; }
   get displayName(): string { return this.config.displayName; }
@@ -119,8 +115,6 @@ export class BenchmarkSimulatedEditor {
   pauseEditing(): void { this._paused = true; }
   resumeEditing(): void { this._paused = false; }
 
-  // ── WebSocket ──────────────────────────────────────────────────────────────
-
   private connect(): Promise<void> {
     return new Promise<void>((resolve) => {
       if (this.config.abortSignal.aborted) { resolve(); return; }
@@ -135,45 +129,39 @@ export class BenchmarkSimulatedEditor {
 
         this.ws.on('open', () => {
           this._connected = true;
-          // IMPORTANT: Send ONLY the auth JSON here.
-          // The server (handleAuthMessage) closes any connection whose first
-          // message is binary. Yjs syncStep1 is sent AFTER auth_success arrives.
           this.ws!.send(JSON.stringify({
             type: 'auth',
             accessToken: this.config.accessToken,
-            fileId: this.config.fileId, // must start with 'sim-' for PermissionGateway bypass
+            fileId: this.config.fileId,
           }));
-          resolve();
         });
 
-        this.ws.on('message', (rawData: Buffer | ArrayBuffer | Buffer[]) => {
-          const buf = rawData instanceof Buffer
-            ? rawData
-            : Buffer.from(rawData as ArrayBuffer);
+        this.ws.on('message', (data: Buffer | ArrayBuffer | Buffer[]) => {
+          const buf = data instanceof Buffer ? data : Buffer.from(data as ArrayBuffer);
+          
+          if (!this._connected) return;
 
-          // ── JSON control messages ──────────────────────────────────────────
-          // auth_success, auth_error, user_joined, ping, etc. are sent as
-          // text frames. Check first byte: '{' = 123.
-          if (buf.length > 0 && buf[0] === 123) {
+          // If we haven't received auth_success yet, check if this is it.
+          if (!this.synced && buf.length > 0 && buf[0] === 123) { // 123 is '{'
             try {
-              const msg = JSON.parse(buf.toString('utf8')) as { type?: string };
-              if (msg.type === 'auth_success') {
-                // Auth complete — now safe to send Yjs syncStep1 binary
+              const str = buf.toString('utf8');
+              const json = JSON.parse(str);
+              if (json.type === 'auth_success') {
+                // Send Yjs sync step 1 NOW
                 const enc = encoding.createEncoder();
                 encoding.writeVarUint(enc, MSG_SYNC);
                 syncProtocol.writeSyncStep1(enc, this.ydoc);
-                this.wsSend(encoding.toUint8Array(enc));
+                this.ws!.send(encoding.toUint8Array(enc));
+                resolve();
               }
-              // auth_error, user_joined, etc. — no action needed
-              return;
             } catch {
-              // Not valid JSON, fall through to binary handling
+              // ignore
             }
+            return;
           }
 
-          // ── Binary Yjs messages ────────────────────────────────────────────
           const uint8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-          this.handleBinaryMessage(uint8);
+          this.handleMessage(uint8);
         });
 
         this.ws.on('close', () => {
@@ -199,44 +187,45 @@ export class BenchmarkSimulatedEditor {
     }
   }
 
-  // ── Message handling ───────────────────────────────────────────────────────
-
-  private handleBinaryMessage(data: Uint8Array): void {
+  private handleMessage(data: Uint8Array): void {
     if (data.length === 0) return;
     try {
       const msgType = data[0]!;
 
       if (msgType === MSG_SYNC) {
         const decoder = decoding.createDecoder(data);
-        decoding.readVarUint(decoder); // consume MSG_SYNC byte
+        decoding.readVarUint(decoder);
         const syncType = decoding.readVarUint(decoder);
 
         if (syncType === syncProtocol.messageYjsSyncStep1) {
-          // Server is requesting our state — send syncStep2
           const sv = decoding.readVarUint8Array(decoder);
           const enc = encoding.createEncoder();
           encoding.writeVarUint(enc, MSG_SYNC);
           syncProtocol.writeSyncStep2(enc, this.ydoc, sv);
           this.wsSend(encoding.toUint8Array(enc));
         } else if (syncType === syncProtocol.messageYjsSyncStep2) {
-          // Initial sync from server — apply and mark as synced
           const update = decoding.readVarUint8Array(decoder);
           Y.applyUpdate(this.ydoc, update);
           if (!this.synced) { this.synced = true; }
         } else if (syncType === syncProtocol.messageYjsUpdate) {
-          // Update broadcast from another client via server
           const update = decoding.readVarUint8Array(decoder);
 
           if (this.mode === 'latency') {
-            // ── LATENCY MODE: capture t2 before applying ─────────────────
-            // t2 is the moment raw bytes arrive at this editor (receive time).
-            // This matches the academic definition of propagation latency.
-            const t2 = performance.now();
+            const opId = createHash('sha256').update(update).digest('hex');
+            
+            if (this.config.injectApplyFailure) throw new Error('Injected apply failure');
+            
+            // applyUpdate will throw if invalid. Do not ACK on failure.
             Y.applyUpdate(this.ydoc, update);
-            // tracker extracts (clientId, clock) from the incremental update
-            this.config.propagationTracker.recordReceive(this.config.editorId, update, t2);
+            
+            const t2 = performance.now();
+            
+            if (this.config.injectDelayedAck) {
+              setTimeout(() => this.config.propagationTracker.recordAck(opId, this.config.editorId, performance.now()), 15000);
+            } else {
+              this.config.propagationTracker.recordAck(opId, this.config.editorId, t2);
+            }
           } else {
-            // ── LOAD MODE: just apply, no latency tracking ───────────────
             Y.applyUpdate(this.ydoc, update);
           }
         }
@@ -247,7 +236,7 @@ export class BenchmarkSimulatedEditor {
         awarenessProtocol.applyAwarenessUpdate(this.awareness, update, null);
       }
     } catch {
-      // Silently ignore malformed messages
+      // Ignore
     }
   }
 
@@ -256,8 +245,6 @@ export class BenchmarkSimulatedEditor {
       this.ws.send(data);
     }
   }
-
-  // ── Edit loop ──────────────────────────────────────────────────────────────
 
   private scheduleEditLoop(): void {
     if (this.config.abortSignal.aborted) return;
@@ -282,81 +269,49 @@ export class BenchmarkSimulatedEditor {
   private performEdit(): void {
     const ytext = this.ydoc.getText('default');
     const source = TEXT_POOL[Math.floor(Math.random() * TEXT_POOL.length)]!;
-    const burst = Math.max(1, Math.min(20, Math.floor(5 + Math.random() * 15)));
-    const snippet = source.slice(0, burst);
+    const snippet = source.slice(0, 5 + Math.floor(Math.random() * 5));
     const insertPos = Math.floor(Math.random() * (ytext.length + 1));
 
     if (this.mode === 'latency') {
-      // ── LATENCY MODE: incremental delta ─────────────────────────────────
-      //
-      // Capture the state vector BEFORE transact. After transact,
-      // Y.encodeStateAsUpdate(ydoc, stateVectorBefore) produces a binary
-      // containing ONLY the newly created struct with:
-      //   struct.id.client === this.ydoc.clientID
-      //   struct.id.clock  === clockBefore
-      //
-      // The tracker looks up (clientId, clockBefore) in the pending map.
-      // O(1) lookup — no linear scan of the document.
+      this.config.propagationTracker.incrementGenerated(); // Pre-flight increment
+      this._editsGenerated++;
 
       const stateVectorBefore = Y.encodeStateVector(this.ydoc);
-      const senderClientId = this.ydoc.clientID;
-      // IMPORTANT: use the character-clock from the state vector, NOT arr.length.
-      // arr.length counts structs; struct.id.clock is the cumulative character position.
-      // Y.encodeStateVector encodes {clientId → nextClock} where nextClock = total chars written.
-      const clockBefore = Y.decodeStateVector(stateVectorBefore).get(senderClientId) ?? 0;
-      const t1 = performance.now();
-
-      // Register with tracker BEFORE sending so t1 is recorded first
-      this.config.propagationTracker.recordSend(
-        this.config.editorId,
-        senderClientId,
-        clockBefore,
-        t1,
-      );
-
-      // Apply edit locally
-      this.ydoc.transact(() => {
-        ytext.insert(insertPos, snippet);
-      });
-
-      // Encode only new structs (delta since stateVectorBefore)
-      const deltaUpdate = Y.encodeStateAsUpdate(this.ydoc, stateVectorBefore);
-
-      const enc = encoding.createEncoder();
-      encoding.writeVarUint(enc, MSG_SYNC);
-      encoding.writeVarUint(enc, 2); // messageYjsUpdate
-      encoding.writeVarUint8Array(enc, deltaUpdate);
-      this.wsSend(encoding.toUint8Array(enc));
-
+      this.ydoc.transact(() => { ytext.insert(insertPos, snippet); });
+      
+      try {
+        const deltaUpdate = Y.encodeStateAsUpdate(this.ydoc, stateVectorBefore);
+        const opId = createHash('sha256').update(deltaUpdate).digest('hex');
+        
+        const expectedRecipients = this.config.getEligibleRecipients(this.config.editorId);
+        
+        const enc = encoding.createEncoder();
+        encoding.writeVarUint(enc, MSG_SYNC);
+        encoding.writeVarUint(enc, 2);
+        encoding.writeVarUint8Array(enc, deltaUpdate);
+        
+        const frame = encoding.toUint8Array(enc);
+        const t1 = performance.now();
+        if (!this.config.injectTrackingFailure) {
+          this.config.propagationTracker.recordSend(opId, this.config.editorId, expectedRecipients, t1);
+        }
+        
+        this.wsSend(frame);
+      } catch (e) {
+        // failed to send
+      }
     } else {
-      // ── LOAD MODE: full-state update (matches production SimulatedEditor.ts)
-      this.ydoc.transact(() => {
-        ytext.insert(insertPos, snippet);
-      });
-
+      this._editsGenerated++;
+      this.ydoc.transact(() => { ytext.insert(insertPos, snippet); });
       const fullUpdate = Y.encodeStateAsUpdate(this.ydoc);
       const enc = encoding.createEncoder();
       encoding.writeVarUint(enc, MSG_SYNC);
-      encoding.writeVarUint(enc, 2); // messageYjsUpdate
+      encoding.writeVarUint(enc, 2);
       encoding.writeVarUint8Array(enc, fullUpdate);
       this.wsSend(encoding.toUint8Array(enc));
     }
-
-    this._editsGenerated++;
   }
 
-  // ── Convergence fingerprint ────────────────────────────────────────────────
-
-  /**
-   * Returns a SHA-256 hex fingerprint of the current Y.Doc state.
-   * Used as a CRDT convergence integrity check:
-   *   - Two editors with identical fingerprints have the same document state.
-   *   - EXPECTED: all editors converge. Failure indicates a software bug.
-   *
-   * NOTE: In-process benchmarks will almost always converge because
-   * Yjs CRDT guarantees it in the same event loop. This check primarily
-   * detects software defects rather than distributed partition scenarios.
-   */
   getDocFingerprint(): string {
     try {
       const state = Y.encodeStateAsUpdate(this.ydoc);

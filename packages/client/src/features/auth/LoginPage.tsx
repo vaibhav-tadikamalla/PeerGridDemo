@@ -33,7 +33,7 @@ export function LoginPage({ initialTab = 'login' }: { initialTab?: Tab }) {
   };
 
   return (
-    <div className="min-h-screen bg-surface-0 flex items-center justify-center p-4">
+    <div className="h-screen overflow-y-auto bg-surface-0 flex items-center justify-center p-4">
       <motion.div
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}

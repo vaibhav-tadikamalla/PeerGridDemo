@@ -105,7 +105,7 @@ function Sparkline({ label, data, timestamps, color, fillColor }: SparklineProps
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-zinc-400">{label}</span>
         <span className="text-sm font-bold tabular-nums" style={{ color }}>
-          {Number.isInteger(current) ? current : current.toFixed(1)}
+          {current == null ? "N/A" : Number.isInteger(current) ? current : current.toFixed(1)}
         </span>
       </div>
 

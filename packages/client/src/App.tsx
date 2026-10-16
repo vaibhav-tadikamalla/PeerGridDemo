@@ -109,7 +109,7 @@ function ChooseModeRoute() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-0 flex items-center justify-center p-4">
+    <div className="h-screen overflow-y-auto bg-surface-0 flex flex-col items-center justify-center p-4">
       <div className="glass rounded-2xl p-8 w-full max-w-md">
         <h1 className="text-xl font-semibold text-text-primary">Choose UI Mode</h1>
         <p className="mt-2 text-sm text-text-muted">Select how you want to enter PeerGrid for this session.</p>

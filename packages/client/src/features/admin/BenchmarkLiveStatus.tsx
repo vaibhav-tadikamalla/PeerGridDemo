@@ -149,7 +149,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
             <div className="text-right">
               <span className="text-xs text-zinc-400">Samples Collected</span>
               <p className="text-sm font-mono font-bold text-zinc-200">
-                {status.samplesCollected.toLocaleString()}
+                {(status.measuredOperationsFullyVerified ?? 0).toLocaleString()}
               </p>
             </div>
           </div>
@@ -161,7 +161,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
                 Median (p50)
               </span>
               <div className="text-3xl font-extrabold font-mono text-blue-400 mt-0.5">
-                {status.liveP50Ms > 0 ? `${status.liveP50Ms}` : '—'}
+                {status.peerP50Ms > 0 ? `${status.peerP50Ms}` : '—'}
                 <span className="text-sm font-normal text-zinc-400 ml-1">ms</span>
               </div>
             </div>
@@ -171,7 +171,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
                 95th %ile (p95)
               </span>
               <div className="text-2xl font-bold font-mono text-indigo-300 mt-1">
-                {status.liveP95Ms > 0 ? `${status.liveP95Ms}` : '—'}
+                {status.peerP95Ms > 0 ? `${status.peerP95Ms}` : '—'}
                 <span className="text-xs font-normal text-zinc-400 ml-1">ms</span>
               </div>
             </div>
@@ -181,7 +181,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
                 99th %ile (p99)
               </span>
               <div className="text-2xl font-bold font-mono text-zinc-200 mt-1">
-                {status.liveP99Ms > 0 ? `${status.liveP99Ms}` : '—'}
+                {status.peerP99Ms > 0 ? `${status.peerP99Ms}` : '—'}
                 <span className="text-xs font-normal text-zinc-400 ml-1">ms</span>
               </div>
             </div>
@@ -191,7 +191,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
                 Latest Sample
               </span>
               <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">
-                {status.latestLatencyMs > 0 ? `${status.latestLatencyMs}` : '—'}
+                {status.peerP50Ms > 0 ? `${status.peerP50Ms}` : '—'}
                 <span className="text-xs font-normal text-zinc-400 ml-1">ms</span>
               </div>
             </div>
@@ -203,7 +203,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
               <span className="font-semibold text-zinc-300">Live Rolling Latency Stream</span>
               <span className="text-[11px]">Recent propagation times ($t_1 \to t_2$)</span>
             </div>
-            <LatencyStreamSparkline samples={status.recentLatencies ?? []} />
+            <LatencyStreamSparkline samples={[]} />
           </div>
         </div>
 
@@ -231,7 +231,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-900/70 border border-zinc-800">
                 <span className="text-xs text-zinc-300">Edits Generated</span>
                 <span className="text-sm font-mono font-bold text-white">
-                  {(status.opsAttempted ?? 0).toLocaleString()} ops
+                  {(status.measuredOperationsGenerated ?? 0).toLocaleString()} ops
                 </span>
               </div>
 
@@ -239,7 +239,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-900/70 border border-zinc-800">
                 <span className="text-xs text-zinc-300">Propagated & Applied</span>
                 <span className="text-sm font-mono font-bold text-blue-400">
-                  {(status.opsPropagated ?? status.samplesCollected ?? 0).toLocaleString()} ops
+                  {(status.measuredOperationsTracked ?? status.measuredOperationsFullyVerified ?? 0).toLocaleString()} ops
                 </span>
               </div>
 
@@ -247,7 +247,7 @@ export function BenchmarkLiveStatus({ status }: Props) {
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-900/70 border border-zinc-800">
                 <span className="text-xs text-zinc-300">Throughput Rate</span>
                 <span className="text-sm font-mono font-bold text-indigo-300">
-                  {status.editsPerSecond.toFixed(1)} ops/sec
+                  {(status.deliveryRate * 100).toFixed(1)} ops/sec
                 </span>
               </div>
             </div>

@@ -111,6 +111,9 @@ export async function registerBenchmarkRoutes(app: FastifyInstance): Promise<voi
       seed: body['seed'] != null ? Number(body['seed']) : undefined,
       collectResourceMetrics: body['collectResourceMetrics'] != null ? Boolean(body['collectResourceMetrics']) : true,
       benchmarkMode: (['latency', 'load'].includes(String(body['benchmarkMode'])) ? String(body['benchmarkMode']) : 'latency') as 'latency' | 'load',
+      injectApplyFailure: body['injectApplyFailure'] != null ? Boolean(body['injectApplyFailure']) : undefined,
+      injectTrackingFailure: body['injectTrackingFailure'] != null ? Boolean(body['injectTrackingFailure']) : undefined,
+      injectDelayedAck: body['injectDelayedAck'] != null ? Boolean(body['injectDelayedAck']) : undefined,
     };
 
     const errors = validateBenchmarkConfig(config);
