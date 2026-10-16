@@ -1,9 +1,3 @@
-databases:
-  - name: peergriddemo-db
-    plan: free
-    databaseName: collab
-    user: collab
-
 services:
   - type: web
     name: peergriddemo-api
@@ -20,9 +14,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        fromDatabase:
-          name: peergriddemo-db
-          property: connectionString
+        sync: false
       - key: DATABASE_POOL_MIN
         value: "2"
       - key: DATABASE_POOL_MAX
