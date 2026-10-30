@@ -11,7 +11,7 @@
  * run history table, CSV/JSON exports, and academic methodology references.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BenchmarkControls } from './BenchmarkControls';
 import { BenchmarkLiveStatus } from './BenchmarkLiveStatus';
 
@@ -19,6 +19,31 @@ import { BenchmarkRunDetail } from './BenchmarkRunDetail';
 import { PerformanceEvaluation } from './PerformanceEvaluation';
 import { useBenchmarkStatus, useBenchmarkRuns, useBenchmarkRun } from './benchmarkHooks';
 import { benchmarkApi, type BenchmarkRun } from './benchmarkApi';
+import { tokenManager } from '@/lib/auth/tokenManager';
+
+// ── Authenticated export download helper ─────────────────────────────────────
+async function downloadExport(runId: string, format: 'csv' | 'json') {
+  try {
+    const token = await tokenManager.getValidToken();
+    const url = benchmarkApi.getExportUrl(runId, format);
+    const res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = `benchmark-${runId.slice(0, 8)}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(objectUrl);
+  } catch (err) {
+    console.error('Export error:', err);
+    alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 export function BenchmarkPage() {
   const status = useBenchmarkStatus();
@@ -48,6 +73,16 @@ export function BenchmarkPage() {
     setActiveCompletedRunId(null);
   };
 
+  // "View Full Report" — select the run and open the history panel
+  const handleViewDetails = useCallback((runId: string) => {
+    setSelectedRunId(runId);
+    setShowAdvancedHistory(true);
+    // Scroll the detail into view after a short tick
+    setTimeout(() => {
+      document.getElementById('benchmark-run-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+  }, []);
+
   return (
     <div className="space-y-8">
       {/* ── Top Header ──────────────────────────────────────────────────────── */}
@@ -55,10 +90,10 @@ export function BenchmarkPage() {
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="text-lg font-bold text-white tracking-tight">
-              Collaborative Swarm Testing & Latency Benchmarks
+              Collaborative Swarm Testing &amp; Latency Benchmarks
             </h2>
             <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-zinc-800 text-zinc-300 border border-zinc-700">
-              Academic Reference: Dang & Ignat
+              Academic Reference: Dang &amp; Ignat
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-400">
@@ -96,7 +131,7 @@ export function BenchmarkPage() {
           <CompletedSwarmTestCard
             runId={activeCompletedRunId}
             onStartNew={handleResetToLauncher}
-            onViewDetails={() => setSelectedRunId(activeCompletedRunId)}
+            onViewDetails={() => handleViewDetails(activeCompletedRunId)}
           />
         </section>
       )}
@@ -112,11 +147,11 @@ export function BenchmarkPage() {
       )}
 
       {/* ── ADVANCED / RUN HISTORY & CHARTS SECTION ────────────────────────── */}
-      {(showAdvancedHistory || (!isRunning && runs.data && runs.data.runs.length > 0)) && (
+      {showAdvancedHistory && (
         <div className="space-y-6 pt-4 border-t border-zinc-800/80">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-zinc-200 uppercase tracking-wider">
-              Benchmark Archives & Comparative Analytics
+              Benchmark Archives &amp; Comparative Analytics
             </h3>
             <span className="text-xs text-zinc-500">
               {runs.data?.total ?? 0} persisted runs in database
@@ -128,14 +163,112 @@ export function BenchmarkPage() {
             <PerformanceEvaluation runs={runs.data.runs} />
           )}
 
-          
+          {/* Run history table — always show when history panel is open */}
+          {runs.isLoading && (
+            <div className="text-xs text-zinc-500 py-4 text-center">Loading run history…</div>
+          )}
+          {runs.data && runs.data.runs.length > 0 && (
+            <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
+                <h3 className="text-sm font-semibold text-zinc-300">
+                  Run History <span className="text-zinc-500 font-normal">({runs.data.total} total)</span>
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-zinc-700 text-zinc-500">
+                      <th className="px-3 py-2 text-left font-medium">Status</th>
+                      <th className="px-3 py-2 text-left font-medium">Mode</th>
+                      <th className="px-3 py-2 text-left font-medium">Started</th>
+                      <th className="px-3 py-2 text-right font-medium">Users</th>
+                      <th className="px-3 py-2 text-right font-medium">p50</th>
+                      <th className="px-3 py-2 text-right font-medium">p95</th>
+                      <th className="px-3 py-2 text-center font-medium">Conv.</th>
+                      <th className="px-3 py-2 text-right font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runs.data.runs.map(run => {
+                      const res = run.results;
+                      const isSelected = run.id === selectedRunId;
+                      const statusStyles: Record<string, string> = {
+                        queued: 'bg-zinc-700 text-zinc-300',
+                        running: 'bg-amber-900/60 text-amber-300 animate-pulse',
+                        completed: 'bg-green-900/50 text-green-400',
+                        failed: 'bg-red-900/50 text-red-400',
+                        cancelled: 'bg-zinc-700 text-zinc-500',
+                      };
+                      return (
+                        <tr
+                          key={run.id}
+                          onClick={() => setSelectedRunId(isSelected ? null : run.id)}
+                          className={`border-b border-zinc-700/50 cursor-pointer transition-colors ${
+                            isSelected ? 'bg-blue-900/20' : 'hover:bg-zinc-700/30'
+                          }`}
+                        >
+                          <td className="px-3 py-2">
+                            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${statusStyles[run.status] ?? ''}`}>
+                              {run.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-[10px] font-mono text-zinc-400">
+                            {run.config.benchmarkMode === 'load' ? 'Load' : 'Latency'}
+                          </td>
+                          <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">
+                            {new Date(run.started_at ?? run.created_at).toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2 text-right text-zinc-300 font-mono">{run.config.userCount}</td>
+                          <td className="px-3 py-2 text-right text-blue-300 font-mono font-medium">
+                            {res ? `${res.peerLatency?.p50Ms?.toFixed(1)}ms` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-right text-violet-300 font-mono font-medium">
+                            {res ? `${res.peerLatency?.p95Ms?.toFixed(1)}ms` : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {res == null ? '—' : res.convergenceAchieved
+                              ? <span className="text-green-400">✓</span>
+                              : <span className="text-red-400">✗</span>
+                            }
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+                              {res && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadExport(run.id, 'csv')}
+                                    className="text-[10px] px-1.5 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors cursor-pointer"
+                                    title="Export CSV"
+                                  >CSV</button>
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadExport(run.id, 'json')}
+                                    className="text-[10px] px-1.5 py-0.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded transition-colors cursor-pointer"
+                                    title="Export JSON"
+                                  >JSON</button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Selected Run Detail Inspection Panel */}
-          {selectedRunId && runs.data?.runs?.find(r => r.id === selectedRunId) && (
-            <BenchmarkRunDetail
-              run={runs.data.runs.find(r => r.id === selectedRunId)!}
-              onClose={() => setSelectedRunId(null)}
-            />
+          {selectedRunId && (
+            <div id="benchmark-run-detail">
+              <SelectedRunDetailPanel
+                runId={selectedRunId}
+                inlineRun={runs.data?.runs?.find(r => r.id === selectedRunId) ?? null}
+                onClose={() => setSelectedRunId(null)}
+              />
+            </div>
           )}
         </div>
       )}
@@ -166,6 +299,42 @@ export function BenchmarkPage() {
       </div>
     </div>
   );
+}
+
+// ── SELECTED RUN DETAIL (fetches fresh if not already in list) ────────────────
+
+function SelectedRunDetailPanel({
+  runId,
+  inlineRun,
+  onClose,
+}: {
+  runId: string;
+  inlineRun: BenchmarkRun | null;
+  onClose: () => void;
+}) {
+  // Always fetch directly from API so we get fresh data even for just-completed runs
+  const { data: fetchedRun, isLoading } = useBenchmarkRun(runId);
+  const run = fetchedRun ?? inlineRun;
+
+  if (isLoading && !run) {
+    return (
+      <div className="bg-zinc-800/60 border border-blue-700/40 rounded-lg p-8 text-center text-zinc-400 text-sm">
+        <span className="w-4 h-4 border-2 border-blue-400/30 border-t-blue-400 rounded-full animate-spin inline-block mr-2" />
+        Loading run details…
+      </div>
+    );
+  }
+
+  if (!run) {
+    return (
+      <div className="bg-zinc-800/60 border border-red-700/40 rounded-lg p-6 text-center text-red-300 text-sm">
+        Could not load run <code className="text-red-200">{runId.slice(0, 8)}</code>. It may have been deleted.
+        <button onClick={onClose} className="ml-3 text-zinc-400 hover:text-zinc-200 underline text-xs">Dismiss</button>
+      </div>
+    );
+  }
+
+  return <BenchmarkRunDetail run={run} onClose={onClose} />;
 }
 
 // ── COMPLETED SWARM TEST HERO CARD ───────────────────────────────────────────
@@ -340,20 +509,20 @@ function CompletedSwarmTestCard({ runId, onStartNew, onViewDetails }: CompletedC
         </div>
 
         <div className="flex items-center gap-2">
-          <a
-            href={benchmarkApi.getExportUrl(runId, 'csv')}
-            className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-mono transition-colors"
-            download
+          <button
+            type="button"
+            onClick={() => downloadExport(runId, 'csv')}
+            className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-mono transition-colors cursor-pointer"
           >
-            ↓ Export CSV
-          </a>
-          <a
-            href={benchmarkApi.getExportUrl(runId, 'json')}
-            className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-mono transition-colors"
-            download
+            EXPORT CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadExport(runId, 'json')}
+            className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded font-mono transition-colors cursor-pointer"
           >
-            ↓ Export JSON
-          </a>
+            EXPORT JSON
+          </button>
         </div>
       </div>
     </div>
