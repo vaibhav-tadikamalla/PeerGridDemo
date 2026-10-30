@@ -70,8 +70,8 @@ export function BenchmarkControls({ isRunning, onStarted }: Props) {
     setError(null);
     try {
       const result = await matrix.mutateAsync({
-        userMatrix: [1, 5, 10, 20, 30, 40, 50],
-        typingSpeedMatrix: [2],
+        userMatrix: [1, 5, 10, 20, 30, 40],
+        typingSpeedMatrix: [2, 5],
         durationSeconds: Math.max(30, cfg.durationSeconds),
         warmupSeconds: cfg.warmupSeconds,
         cooldownSeconds: cfg.cooldownSeconds,
@@ -125,7 +125,7 @@ export function BenchmarkControls({ isRunning, onStarted }: Props) {
               onChange={e => setMatrixMode(e.target.checked)}
               className="rounded border-zinc-600 text-blue-600 focus:ring-0"
             />
-            Academic Matrix Mode (1–50 Users)
+            Academic Matrix Mode (1–40 Users, 2 Speeds)
           </label>
         </div>
       </div>
@@ -385,7 +385,7 @@ export function BenchmarkControls({ isRunning, onStarted }: Props) {
                 disabled={matrix.isPending}
                 className="w-full py-4 px-6 rounded-xl text-base font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 transition-all shadow-xl shadow-purple-600/30 flex items-center justify-center gap-3 cursor-pointer"
               >
-                {matrix.isPending ? 'Queuing Matrix Runs…' : '⚡ START ACADEMIC MATRIX (1 TO 50 USERS)'}
+                {matrix.isPending ? 'Queuing Matrix Runs…' : '⚡ START ACADEMIC MATRIX (1–40 USERS × 2 SPEEDS)'}
               </button>
             )}
           </>
