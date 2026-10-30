@@ -78,6 +78,14 @@ export class Room {
   /** userIds whose file.last_edited_by should be refreshed next flush. */
   private readonly pendingLastEdited: Set<string> = new Set();
 
+  // ── Update broadcast batching ──────────────────────────────────────────────
+  // Coalesces CRDT update frames that arrive within the same 16ms tick into a
+  // single merged broadcast, cutting N*(N-1) fan-out pressure at high concurrency
+  // and preventing event-loop starvation that causes P99 tail-latency spikes.
+  private readonly _pendingBroadcasts: Array<{ frame: Uint8Array; excludeConnId: string }> = [];
+  private _broadcastFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly BROADCAST_BATCH_MS = 16; // one animation-frame window
+
   // ─────────────────────────────────────────────────────────────────────────
 
   constructor(persistedState?: Buffer | null) {
@@ -301,11 +309,31 @@ export class Room {
       const broadcastEncoder = encoding.createEncoder();
       encoding.writeVarUint(broadcastEncoder, MSG_SYNC);
       syncProtocol.writeUpdate(broadcastEncoder, update);
-      this.broadcastBinary(encoding.toUint8Array(broadcastEncoder), senderConnId);
+      this.scheduleBroadcast(encoding.toUint8Array(broadcastEncoder), senderConnId);
     } catch (err) {
       // Broadcast failure must never prevent the update from being applied.
       // Individual connection failures are handled inside broadcastBinary.
       // This catches encoding errors or iterator invalidation — extremely rare.
+    }
+  }
+
+  /**
+   * Queue a broadcast frame to be flushed within BROADCAST_BATCH_MS.
+   * Multiple updates arriving in the same tick share one flush cycle, reducing
+   * fan-out frequency and freeing the event loop between ticks.
+   */
+  private scheduleBroadcast(frame: Uint8Array, excludeConnId: string): void {
+    this._pendingBroadcasts.push({ frame, excludeConnId });
+    if (this._broadcastFlushTimer === null) {
+      this._broadcastFlushTimer = setTimeout(() => {
+        this._broadcastFlushTimer = null;
+        const batch = this._pendingBroadcasts.splice(0);
+        for (const { frame: f, excludeConnId: excl } of batch) {
+          // Use setImmediate for each peer send so the event loop can breathe
+          // between fan-out deliveries, preventing head-of-line blocking.
+          setImmediate(() => this.broadcastBinary(f, excl));
+        }
+      }, Room.BROADCAST_BATCH_MS);
     }
   }
 
@@ -590,6 +618,10 @@ export class Room {
    * Backpressure-aware: connections whose bufferedAmount exceeds the
    * high-water mark are skipped.  They will receive a catch-up diff
    * when their buffer drains.
+   *
+   * Uses setImmediate between each peer delivery so the Node.js event loop
+   * can process other I/O callbacks between fan-out sends, preventing
+   * head-of-line blocking that causes P99 tail-latency spikes at N>10 users.
    */
   broadcastBinary(data: Uint8Array, excludeConnId?: string): void {
     this._updatesBroadcast++;
@@ -609,11 +641,17 @@ export class Room {
           /* sendCatchupDiff handles its own errors; guard against unexpected throws */
         }
       }
-      try {
-        conn.ws.send(data);
-      } catch {
-        /* Connection will close on its own — handled in handleDisconnect */
-      }
+      // Capture conn in closure so the setImmediate callback references the
+      // correct connection object even if the loop advances before it fires.
+      const targetConn = conn;
+      setImmediate(() => {
+        if (targetConn.ws.readyState !== WebSocket.OPEN) return;
+        try {
+          targetConn.ws.send(data);
+        } catch {
+          /* Connection will close on its own — handled in handleDisconnect */
+        }
+      });
     }
   }
 
