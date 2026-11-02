@@ -1,19 +1,42 @@
 # PeerGrid
 
+[![CI](https://github.com/vaibhav-tadikamalla/peergrid-realtime-workspace/actions/workflows/ci.yml/badge.svg)](https://github.com/vaibhav-tadikamalla/peergrid-realtime-workspace/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Yjs](https://img.shields.io/badge/Yjs-13.6-orange)](https://yjs.dev/)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](docker-compose.yml)
+
 **Real-time collaborative workspace built with CRDTs, WebSockets, and folder-level RBAC.**
+
+🚀 **[Live demo](https://peergriddemo-web-mah6.onrender.com/)** — hosted on Render's free tier; may take ~30 seconds to wake up from idle.
 
 PeerGrid lets multiple users create folders, manage files, and simultaneously edit rich-text documents with zero conflicts. Every edit is resolved automatically using **Conflict-free Replicated Data Types** (Yjs), making merges mathematically correct regardless of network conditions or edit order.
 
 ---
 
-## Investor Snapshot
+## Highlights
 
-- **Product:** Real-time collaborative document infrastructure for teams that need low-latency editing, role-safe collaboration, and strong operational observability.
-- **Technical moat:** CRDT-native architecture (Yjs), distributed room coordination, Redis stream idempotency, and production hardening patterns already integrated.
-- **Enterprise readiness signals:** RBAC at folder scope, protected operational endpoints, structured metrics (Prometheus + Grafana), resilience testing, and durable snapshot/version flows.
-- **Commercial wedge:** Teams building compliance-heavy internal collaboration tools can embed this stack faster than building concurrency, conflict resolution, and real-time sync in-house.
+- **CRDT sync with Yjs** — conflict-free rich-text editing; server applies, persists, and broadcasts Yjs binary updates over WebSocket.
+- **Folder-level RBAC enforced on REST and WebSocket** — owner / editor / viewer roles checked at every API endpoint and inside `handleSyncMessage()`.
+- **Measured P99 8.44 ms at 40 editors** on loopback (single-node; see Performance section below).
 
-For an investor and diligence-focused overview, see [INVESTOR_BRIEF.md](INVESTOR_BRIEF.md).
+---
+
+## Performance
+
+### Propagation latency by editor count (loopback, ms, best of N valid runs)
+
+| Users | N | P50    | P95    | P99    | Max     |
+|------:|--:|-------:|-------:|-------:|--------:|
+|     2 | 2 |   1.85 |   2.24 |   2.30 |    2.31 |
+|     5 | 1 |   2.29 |   3.29 |   3.69 |    4.18 |
+|    10 | 2 |   1.93 |   2.71 |   3.27 |    4.98 |
+|    20 | 1 |   2.36 |   3.29 |   3.88 |    6.43 |
+|    40 | 1 |   3.73 |   6.38 |   8.44 |   42.96 |
+|    80 | 3 |  12.94 |  60.56 | 114.10 |  321.31 |
+|   120 | 4 | 224.75 | 555.33 | 739.77 | 1024.40 |
+
+Measured with `benchmark-cli.mjs` on loopback; single-node limit appears between 40 and 80 editors.
 
 ---
 
@@ -51,7 +74,7 @@ For an investor and diligence-focused overview, see [INVESTOR_BRIEF.md](INVESTOR
 │   │  • Folders CRUD          │   │  • Sync protocol               │  │
 │   │  • Files CRUD + Trash    │   │  • Awareness (cursors)         │  │
 │   │  • Permissions (RBAC)    │   │  • Role-gated writes           │  │
-│   │  • Activity logs         │   │  • Auto-save every 10s         │  │
+│   │  • Activity logs         │   │  • Auto-save every 5s          │  │
 │   │  • Search (FTS + ILIKE)  │   │  • Edit session tracking       │  │
 │   │  • Rate limiting         │   │  • In-memory edit batching     │  │
 │   └──────────────────────────┘   └────────────────────────────────┘  │
@@ -111,7 +134,7 @@ Client A edits → Y.Doc update (binary) → WebSocket → Server Y.Doc → broa
 
 - **SyncStep1/SyncStep2** — on connect, the server and client exchange state vectors to bring each other up to date.
 - **Awareness** — cursor positions, user names, and colors are broadcast to all peers in the room via the awareness protocol.
-- **Auto-save** — the server snapshots the Y.Doc state to PostgreSQL every 10 seconds (if the document is dirty).
+- **Auto-save** — the server snapshots the Y.Doc state to PostgreSQL every 5 seconds (if the document is dirty).
 
 ### In-Memory Edit Batching
 
@@ -184,7 +207,7 @@ PeerGrid/
 │   ├── server/                     # Fastify API + WebSocket server
 │   │   ├── src/
 │   │   │   ├── auth/               # JWT (RS256), middleware, OTP utils
-│   │   │   ├── db/                 # Pool, migrations (001–004)
+│   │   │   ├── db/                 # Pool, migrations (001–012)
 │   │   │   ├── middleware/         # Error handler, rate limiter
 │   │   │   ├── routes/             # Auth, folders, files, permissions, activity, search, health
 │   │   │   ├── services/           # Business logic (file, folder, permission, edit tracking, search, activity)
@@ -218,11 +241,14 @@ PeerGrid/
 │       │   └── protocol.ts
 │       └── package.json
 │
-├── docker-compose.yml              # Dev infrastructure (Postgres only)
+├── docs/                           # Architecture, hardening, and walkthrough docs
+├── observability/                  # Prometheus + Grafana configuration
+├── scripts/                        # Key generation and deploy helpers
+├── docker-compose.yml              # Dev infrastructure (Postgres + Prometheus + Grafana)
 ├── docker-compose.prod.yml         # Full production stack
+├── benchmark-cli.mjs               # Standalone propagation-latency benchmark
 ├── .env.example                    # Dev environment template
 ├── .env.production.example         # Production environment template
-├── scripts/generate-keys.mjs       # RSA key pair generator
 └── package.json                    # Workspace root (pnpm monorepo)
 ```
 
@@ -240,8 +266,8 @@ PeerGrid/
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/your-user/peergrid.git
-cd peergrid
+git clone https://github.com/vaibhav-tadikamalla/peergrid-realtime-workspace.git
+cd peergrid-realtime-workspace
 pnpm install
 
 # 2. Generate JWT keys
@@ -308,21 +334,18 @@ curl http://localhost/health/ready
 | **SQL injection prevention**| Parameterized queries everywhere, ILIKE wildcards escaped        |
 | **Password hashing**        | bcrypt with auto salt rounds                                     |
 | **JWT RS256**               | Asymmetric keys — server signs, anyone can verify                |
-| **WebSocket auth**          | Token verified before room join, 5s auth timeout                 |
+| **WebSocket auth**          | Token verified before room join, 10 s auth timeout               |
 | **Graceful shutdown**       | SIGTERM/SIGINT → flush edits → save docs → close connections → drain pool |
 
 ### Scaling Considerations
 
 - **Current**: Single-server deployment. Y.Doc state lives in-memory per server.
-- **Horizontal scaling** would require:
-  - Redis Pub/Sub for cross-instance CRDT sync
-  - Sticky sessions or client-side reconnect logic
-  - Distributed lock manager for concurrent save protection
+- **Multi-node** (implemented, requires Redis): consistent hash ring (`consistentHash.ts`), Redis Streams for durable CRDT log (`redisStreams.ts`), Redis-backed room store with distributed locking (`RedisRoomStore.ts`), and viewport-aware presence service (`presenceService.ts`). Set `REDIS_URL` to enable.
 
 ### Resource Recommendations
 
 | Resource   | Minimum  | Recommended       |
-|------------|----------|--------------------|
+|------------|----------|-------------------|
 | CPU        | 1 core   | 2 cores            |
 | RAM        | 512 MB   | 1 GB               |
 | Disk (PG)  | 1 GB     | 10 GB+             |
@@ -337,16 +360,14 @@ curl http://localhost/health/ready
 | Y.Doc state in PostgreSQL BYTEA | Not queryable | CRDT binary state can't be SQL-queried, but it's compact and portable |
 | In-memory edit batching         | Data loss window (5s) | Reduces DB writes from per-keystroke to periodic flush — acceptable for edit counts |
 | Folder-level permissions only   | No per-file ACLs | Simpler mental model. Files inherit folder permissions |
-| Single-process architecture     | No horizontal scaling | Correct for single-server. Adding Redis Pub/Sub enables multi-instance |
+| Single-process default          | No horizontal scaling without Redis | Multi-node path is implemented; set `REDIS_URL` to activate cluster mode |
 | OTP returned in dev response    | Security in dev only | Production blocks OTP from response; email transport is a future integration |
-| No Redis in current stack       | In-memory token blacklist | Acceptable for single-instance; add Redis for multi-instance deploys |
 
 ---
 
 ## Future Improvements
 
 - **Email transport** for OTP-based sharing (SendGrid / SES integration)
-- **Redis Pub/Sub** for cross-instance CRDT sync (horizontal scaling)
 - **File version history** — periodic snapshots with restore capability
 - **Comments & annotations** — threaded comments anchored to document positions
 - **Cursor labels** — show user names next to cursor positions in the editor
