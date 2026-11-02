@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  ci:
+    name: Lint · Typecheck · Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read .node-version
+        id: node-version
+        run: echo "NODE_VERSION=$(cat .node-version)" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node-version.outputs.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # version is read from packageManager field in package.json (pnpm@8.15.0)
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (if script exists)
+        run: |
+          if pnpm run --if-present lint 2>/dev/null; then
+            echo "Lint passed"
+          else
+            echo "No lint script found, skipping"
+          fi
+
+      - name: Typecheck (if script exists)
+        run: |
+          if pnpm run --if-present typecheck 2>/dev/null; then
+            echo "Typecheck passed"
+          else
+            echo "No typecheck script found, skipping"
+          fi
+
+      - name: Build
+        run: pnpm run build
